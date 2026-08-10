@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import requests
+import jwt
 import json
 import os
 import uuid
@@ -8,8 +8,8 @@ app = Flask(__name__)
 
 VEHICLES_FILE = 'vehicles.json'
 
-AUTH_SERVICE_URL = os.environ.get('AUTH_SERVICE_URL', 'http://localhost:5001')
-AUTH_VERIFY_ENDPOINT = f"{AUTH_SERVICE_URL}/verify"
+JWT_SECRET = os.environ.get('JWT_SECRET', 'cs361-demo-secret')
+JWT_ALGORITHM = 'HS256'
 
 def load_vehicles():
     "Load the vehicles.json file into a dict"
@@ -28,27 +28,22 @@ def save_vehicles(data):
 
 def get_authenticated_user():
     "Pulls token from authorization header and asks Auth service to verify it"
-    auth_header = request.headers.get('Authorization')
+    auth_header = request.headers.get('Authorization', '')
     if not auth_header.startswith('Bearer '):
         return None
 
     token = auth_header.split(" ", 1)[1]
 
     try:
-        response = requests.post(
-            AUTH_VERIFY_ENDPOINT,
-            json={'token': token},
-            timeout=5,
-        )
-    except requests.exceptions.RequestException:
-        # Auth service unreachable - fail closed
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.PyJWTError:
+        # Covers expired, malformed, or bad signature tokens
         return None
 
-    if response.status_code != 200:
+    if payload.get('type') != 'access':
         return None
 
-    body = response.json()
-    return body.get('user_id')
+    return payload.get('sub')
 
 @app.route('/vehicles', methods=['GET'])
 def list_vehicles():
@@ -91,7 +86,7 @@ def add_vehicle():
         'make': payload['make'],
         'model': payload['model'],
         'year': payload['year'],
-        'plate': payload['plate', ""],
+        'plate': payload.get('plate', ""),
     }
     user_vehicles.append(new_vehicle)
     save_vehicles(vehicles)
